@@ -1,65 +1,58 @@
 #!/usr/bin/env python3
-"""Write the vending-machine pickup line entry to /output/entry.txt.
+"""Write one vending-machine pickup line to /output/entry.txt.
 
-Stdlib only. No network, no reading of outside files. The entry is a
-single line of 1-200 characters (not whitespace-only), validated before
-writing. The write is atomic (temp file + os.replace + fsync) and the
-file is read back byte-for-byte; any mismatch fails loudly.
+Stdlib only, no network, no reads outside this program.
 """
 
 import os
 import sys
-import tempfile
 
-ENTRY = "Psst \u2014 I've got exact change and a whole row of snacks, but honestly, you're the only thing I want to dispense."
-
+ENTRY = "Psst — I've got exact change and a whole row of snacks, but honestly, you're the only thing I want to dispense."
 OUTPUT_PATH = "/output/entry.txt"
+MAX_LENGTH = 200
+
+
+def validate_entry(entry: str) -> str | None:
+    """Return an error message if the entry is invalid, else None."""
+    if not entry:
+        return "entry is empty"
+    if "\n" in entry or "\r" in entry:
+        return "entry must be a single line"
+    if len(entry) > MAX_LENGTH:
+        return f"entry is {len(entry)} characters, over the {MAX_LENGTH} limit"
+    return None
 
 
 def main() -> int:
-    entry = ENTRY
-
-    # Gate: 1-200 characters, one line, not whitespace-only.
-    if not entry or entry.strip() == "":
-        print("error: entry is empty or whitespace-only", file=sys.stderr)
-        return 1
-    if len(entry) > 200:
-        print(f"error: entry is {len(entry)} characters, over the 200 limit",
-              file=sys.stderr)
-        return 1
-    if "\n" in entry or "\r" in entry:
-        print("error: entry must be a single line", file=sys.stderr)
+    error = validate_entry(ENTRY)
+    if error is not None:
+        print(f"error: {error}", file=sys.stderr)
         return 1
 
-    data = entry.encode("utf-8")
-
+    # Write atomically via a temp file in the same directory, then replace.
     out_dir = os.path.dirname(OUTPUT_PATH)
     os.makedirs(out_dir, exist_ok=True)
-
-    # Atomic write: temp file in the same directory, fsync, os.replace.
-    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".entry-", suffix=".tmp")
+    tmp_path = OUTPUT_PATH + ".tmp"
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
+        with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+            f.write(ENTRY)
         os.replace(tmp_path, OUTPUT_PATH)
-    except BaseException:
+    except OSError as exc:
+        print(f"error: failed to write {OUTPUT_PATH}: {exc}", file=sys.stderr)
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-        raise
-
-    # Read back byte-for-byte and fail on any mismatch.
-    with open(OUTPUT_PATH, "rb") as f:
-        written = f.read()
-    if written != data:
-        print("error: read-back mismatch after writing entry.txt",
-              file=sys.stderr)
         return 1
 
-    print(f"entry written: {len(entry)} characters")
+    # Read back and verify the written content matches exactly.
+    with open(OUTPUT_PATH, "r", encoding="utf-8", newline="") as f:
+        written = f.read()
+    if written != ENTRY:
+        print("error: verification failed, file content does not match entry", file=sys.stderr)
+        return 1
+
+    print(f"Wrote {len(ENTRY)} characters to {OUTPUT_PATH}")
     return 0
 
 
